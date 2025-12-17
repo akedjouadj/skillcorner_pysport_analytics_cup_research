@@ -211,6 +211,7 @@ class OffenseRating:
         ax.set_xlim(0, config.FIELD_LENGTH)
         ax.set_ylim(0, config.FIELD_WIDTH)
         ax.set_aspect("equal")
+        ax.set_title("Passing Option Values (POV) for Team A")
         plt.tight_layout()
         plt.show()
     
@@ -311,18 +312,19 @@ class OffenseRating:
     
 if __name__ == "__main__":
     
-    tracking_df = pd.read_csv("data/match_1886347/tracking_df.csv")
+    """tracking_df = pd.read_csv("data_dev/match_1886347/tracking_df.csv")
     
     # translater les coordonnées pour que l'origine soit au coin bas gauche et non au centre
     tracking_df["x"] = tracking_df["x"] + config.FIELD_LENGTH / 2
     tracking_df["y"] = tracking_df["y"] + config.FIELD_WIDTH / 2
 
-    """frame = tracking_df[tracking_df["frame_id"]==1000].copy()
+    frame = tracking_df[tracking_df["frame_id"]==1000].copy()"""
+
+    frame = pd.read_csv("data_dev/match_1886347/frame.csv")
 
     # check if a player is in possession of the ball
     if frame["is_ball_carrier"].sum() == 0:
         raise ValueError("No player in possession of the ball in this frame.")
-
 
     # translater les coordonnées pour que l'origine soit au coin bas gauche et non au centre
     frame["x"] = frame["x"] + config.FIELD_LENGTH / 2
@@ -340,9 +342,9 @@ if __name__ == "__main__":
     offense_rating.plot_pov(home_team_id=team_A_id,
                             away_team_id=team_B_id,
                             frame=frame,
-                            pov_dict=pov_dict)"""
+                            pov_dict=pov_dict)
     
-    offense_rating = OffenseRating(config.FIELD_LENGTH)
+    """offense_rating = OffenseRating(config.FIELD_LENGTH)
     ocr_df = offense_rating.get_ocr(tracking_df)
-    print(ocr_df)
+    print(ocr_df)"""
     

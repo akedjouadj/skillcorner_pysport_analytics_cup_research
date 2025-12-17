@@ -16,7 +16,7 @@ OffBR is composed of two complementary ratings computed from XY tracking data.
 
 Offside positions are assigned zero value. Reception probability incorporates distance decay and geometric defender obstruction based on angular interference and proximity to the passing lane. OCR is obtained by averaging POV values over rolling 2-second windows across the match.
 
-![Option Creation Rating visualization showing player positions and OCR values](outputs/plots/frame_passing_options_probs.png)
+![Option Creation Rating visualization showing player positions and OCR values](outputs/plots/frame_passing_options_values.png)
 
 2. The **Space Control Rating (SCR)** evaluates defensive positioning through two mechanisms:
 - **Zone coverage**, identifying high-xT locations occupied by attackers without a defender within a control radius (R = 3 m), and assigning defenders a coverage ratio.
