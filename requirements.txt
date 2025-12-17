@@ -1,0 +1,7 @@
+numpy
+pandas
+matplotlib
+scipy
+tqdm
+seaborn
+kloppy>=3.18.0
