@@ -40,6 +40,7 @@ The raw tracking data is processed into a unified pandas DataFrame with the foll
 - `frame_id`: unique frame identifier  
 - `time_stamp`: timestamp in seconds  
 - `period`: match period (1 or 2)  
+- `attacking_direction`: ball carrier attacking direction, "left" of "right"
 - `ball_x`, `ball_y`: ball position  
 - `team_id`: team identifier  
 - `player_id`: player identifier  

@@ -28,7 +28,7 @@ The final **OffBR** is defined as the ordered pair **(OCR, SCR)**. Keeping both 
 
 ## Results
 
-Applied to **10 A-League matches** (309 player-match observations), OffBR reveals consistent tactical patterns. Midfielders exhibit the highest OCR values (mean = 0.0209), reflecting their central role in option creation, while forwards record the highest SCR values (mean = 0.0329), highlighting their contribution to defensive pressure. Full-backs display the most balanced profiles (OCR/SCR ratio = 0.97), followed by wide attackers (0.74).
+Applied to **10 A-League matches** (309 player-match observations), OffBR reveals consistent tactical patterns. Midfielders exhibit the highest OCR values (mean = 0.0276), reflecting their central role in option creation, while forwards record the highest SCR values (mean = 0.0362), highlighting their contribution to defensive pressure. Full-backs display the most balanced profiles (OCR/SCR ratio = 0.89), followed by wide attackers (0.83).
 
 Temporal analysis shows that OCR decreases steadily over match duration, while SCR remains stable, suggesting that offensive movement quality degrades with fatigue whereas defensive positioning is better maintained.
 

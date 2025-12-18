@@ -9,7 +9,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from matplotlib.patches import Circle, Rectangle, Arc
 from typing import Dict, Tuple, List
 
 import config
@@ -30,6 +29,11 @@ class OffenseRating:
             field_length: Length of the field in meters
         """
         self.field_length = field_length
+        self.xt_grids = {
+            "left": XTGrid(config.FIELD_LENGTH, config.FIELD_WIDTH, attacking_direction="left"),
+            "right": XTGrid(config.FIELD_LENGTH, config.FIELD_WIDTH, attacking_direction="right"),
+        }
+
     
     def calc_passing_probability(self,
                                    receiver_pos: Tuple[float, float],
@@ -71,7 +75,7 @@ class OffenseRating:
             )
             
             # Defender impact (higher impact when close to line and small angle)
-            if dist_to_line < 3.0:  # Only consider defenders close to pass line
+            if dist_to_line < config.OD:  # Only consider defenders close to pass line
                 obstruction = 1.0 - np.exp(-config.ALPHA * angle / config.BETA)
                 defender_factor *= obstruction
         
@@ -81,6 +85,10 @@ class OffenseRating:
     
     # Plotting
     def plot_passing_probabilities(self, receivers, passer, defenders):
+        """
+        Visualize passing probabilities to multiple receivers from a passer in a frame
+        """
+        
         probs = [self.calc_passing_probability(r, passer, defenders) for r in receivers]
 
         fig, ax = plt.subplots(figsize=(12, 7))
@@ -111,7 +119,7 @@ class OffenseRating:
         ax.set_aspect("equal")
         plt.tight_layout()
         plt.show()
-
+    
     def calc_pov(self, frame_data: pd.DataFrame) -> Dict[str, float]:
         """
         Calculate Passing Option Value (POV) for all players in a frame
@@ -124,7 +132,7 @@ class OffenseRating:
         Returns:
             Dictionary mapping player_id to POV value
         """
-        pov_dict = {}
+        pov_dict = {pid: 0.0 for pid in frame_data["player_id"].values}
         
         # Get possession team
         possession_team_id = frame_data['possession_team_id'].iloc[0]
@@ -134,10 +142,16 @@ class OffenseRating:
         
         if len(ball_carrier) == 0:
             # No clear ball carrier, return zeros
-            return {pid: 0.0 for pid in frame_data['player_id'].unique()}
+            return pov_dict
         
         ball_carrier = ball_carrier.iloc[0]
         passer_pos = (ball_carrier['x'], ball_carrier['y'])
+
+         # Attacking direction (once)
+        attacking_direction = ball_carrier['attacking_direction']
+
+        # Cached xT grid
+        xt_grid = self.xt_grids[attacking_direction]
         
         # Get teammates (excluding ball carrier)
         teammates = frame_data[
@@ -147,38 +161,43 @@ class OffenseRating:
         
         # Get opponents
         opponents = frame_data[frame_data['team_id'] != possession_team_id]
-        defender_positions = [(row['x'], row['y']) for _, row in opponents.iterrows()]
+        defender_positions = opponents[["x", "y"]].to_numpy()
         
-        # Calculate POV for each teammate
-        for _, player in teammates.iterrows():
-            receiver_pos = (player['x'], player['y'])
-            
-            # Check for offside
-            attacking_direction = 'right' if passer_pos[0] < self.field_length / 2 else 'left'
-            if utils.is_offside(receiver_pos, passer_pos, defender_positions, attacking_direction):
-                pov_dict[player['player_id']] = 0.0
+        # Loop only over receivers
+        for row in teammates.itertuples(index=False):
+            receiver_pos = (row.x, row.y)
+
+            # Offside check
+            if utils.is_offside(
+                receiver_pos,
+                passer_pos,
+                defender_positions,
+                attacking_direction
+            ):
                 continue
-            
-            # Calculate passing probability
+
+            # Passing probability
             pass_prob = self.calc_passing_probability(
-                receiver_pos, passer_pos, defender_positions
+                receiver_pos,
+                passer_pos,
+                defender_positions
             )
-            
-            # Get xT value at receiver position
-            xt_grid = XTGrid(config.FIELD_LENGTH, config.FIELD_WIDTH, attacking_direction=attacking_direction)
-            xt_value = xt_grid.get_xt_value(receiver_pos[0], receiver_pos[1])
-            
-            # POV
-            pov_dict[player['player_id']] = math.sqrt(pass_prob * xt_value)
-        
-        # Set POV to 0 for ball carrier and opponents
-        for _, player in frame_data.iterrows():
-            if player['player_id'] not in pov_dict:
-                pov_dict[player['player_id']] = 0.0
-        
+
+            if pass_prob <= 0.0:
+                continue
+
+            # xT value
+            xt_value = xt_grid.get_xt_value(row.x, row.y)
+
+            pov_dict[row.player_id] = math.sqrt(pass_prob * xt_value)
+
         return pov_dict
 
     def plot_pov(self, home_team_id, away_team_id, frame, pov_dict):
+        """
+        Visualize Passing Option Values (POV) for all receivers in a frame
+        """
+        
         fig, ax = plt.subplots(figsize=(12,7))
         utils.draw_pitch(ax)
 
@@ -215,36 +234,6 @@ class OffenseRating:
         plt.tight_layout()
         plt.show()
     
-    def calc_movement_threat(self,
-                             frame_t: pd.DataFrame,
-                             frame_t_minus_1: pd.DataFrame) -> Dict[str, float]:
-        """
-        Calculate movement threat as difference in POV between consecutive frames
-        
-        Movement Threat = POV_t - POV_{t-1}
-        
-        Args:
-            frame_t: Current frame data
-            frame_t_minus_1: Previous frame data
-            
-        Returns:
-            Dictionary mapping player_id to movement threat value
-        """
-        pov_t = self.calc_pov(frame_t)
-        pov_t_minus_1 = self.calc_pov(frame_t_minus_1)
-        
-        movement_threat = {}
-        
-        for player_id in pov_t.keys():
-            if player_id in pov_t_minus_1:
-                threat = pov_t[player_id] - pov_t_minus_1[player_id]
-                # Only count positive movements (improvements in option value)
-                movement_threat[player_id] = max(0.0, threat)
-            else:
-                movement_threat[player_id] = 0.0
-        
-        return movement_threat
-    
     def get_ocr(self, tracking_df: pd.DataFrame) -> pd.DataFrame:
         """
         Calculate Option Creation Rating (OCR) for all players across entire match
@@ -253,98 +242,83 @@ class OffenseRating:
             tracking_df: Full tracking DataFrame for the match
             
         Returns:
-            DataFrame with columns: player_id, team_id, ocr, playing_time
+            DataFrame with columns: player_id, team_id, ocr
         """
         # Get unique frames sorted by time
         frames = sorted(tracking_df['frame_id'].unique())
 
         # downsample to T-second intervals if needed
-        period = config.T
+        period = config.OCR_FREQ
         fps = config.FPS
         frame_interval = int(period * fps)
         frames = frames[::frame_interval]
         
+        frame_groups = dict(tuple(tracking_df.groupby("frame_id")))
+
+        player_team_map = (
+            tracking_df[["player_id", "team_id"]]
+            .drop_duplicates()
+            .set_index("player_id")["team_id"]
+            .to_dict()
+        )
+        
         # Initialize accumulator for each player
-        ocr_accumulator = {}
-        playing_time = {}
-        team_mapping = {}
+        ocr_sum = {}
+        ocr_count = {}
+        ocr_seq = {}
         
         # Process consecutive frames
         print("Calculating Option Creation Rating (OCR) for all players at a 2-second interval...")
         for frame_id in tqdm(frames):
             
-            frame_data = tracking_df[tracking_df['frame_id'] == frame_id]
+            frame_data = frame_groups[frame_id]
             
             # Calculate pov dict for the frame
             pov_dict = self.calc_pov(frame_data)
             
-            for player_id, pov_value in pov_dict.items():
-                if player_id not in ocr_accumulator:
-                    ocr_accumulator[player_id] = []
-                    playing_time[player_id] = 0.0
-                    
-                    # Store team mapping
-                    player_team = frame_data[frame_data['player_id'] == player_id]['team_id'].iloc[0]
-                    team_mapping[player_id] = player_team
-                
-                ocr_accumulator[player_id].append(pov_value)
-                playing_time[player_id] = frame_id/fps/60 # in minutes
+            for player_id, pov in pov_dict.items():
+
+                if player_id not in ocr_sum:
+                    ocr_sum[player_id] = 0.0
+                    ocr_count[player_id] = 0
+                    ocr_seq[player_id] = []
+
+                ocr_sum[player_id] += pov
+                ocr_count[player_id] += 1
+                ocr_seq[player_id].append(pov)
         
-        # Create result DataFrame
-        results_df = []
+         # --- Build output ---
+        results = []
         results_seq = {}
-        for player_id, pov_values in ocr_accumulator.items():
-            avg_pov = np.mean(pov_values)
-            # Normalize by playing time (per 90 minutes)
-            time_played = playing_time[player_id]
-            
-            results_df.append({
-                'player_id': player_id,
-                'team_id': team_mapping[player_id],
-                'avg_option_creation_rating': avg_pov,
-                'playing_time': time_played
+
+        for player_id in ocr_sum:
+            avg_ocr = ocr_sum[player_id] / max(1, ocr_count[player_id])
+
+            results.append({
+                "player_id": player_id,
+                "team_id": player_team_map[player_id],
+                "avg_option_creation_rating": avg_ocr,
             })
 
-            results_seq[player_id] = {'seq_option_creation_rating': pov_values}
-                
-        
-        return pd.DataFrame(results_df), results_seq
+            results_seq[player_id] = {
+                "seq_option_creation_rating": ocr_seq[player_id]
+            }
+
+        return pd.DataFrame(results), results_seq
     
 if __name__ == "__main__":
     
-    """tracking_df = pd.read_csv("data_dev/match_1886347/tracking_df.csv")
-    
-    # translater les coordonnées pour que l'origine soit au coin bas gauche et non au centre
-    tracking_df["x"] = tracking_df["x"] + config.FIELD_LENGTH / 2
-    tracking_df["y"] = tracking_df["y"] + config.FIELD_WIDTH / 2
+    # Example usage: plot passing option values for a single frame
 
-    frame = tracking_df[tracking_df["frame_id"]==1000].copy()"""
+    frame = pd.read_csv("data/match_1886347/frame.csv")
 
-    frame = pd.read_csv("data_dev/match_1886347/frame.csv")
-
-    # check if a player is in possession of the ball
-    if frame["is_ball_carrier"].sum() == 0:
-        raise ValueError("No player in possession of the ball in this frame.")
-
-    # translater les coordonnées pour que l'origine soit au coin bas gauche et non au centre
-    frame["x"] = frame["x"] + config.FIELD_LENGTH / 2
-    frame["y"] = frame["y"] + config.FIELD_WIDTH / 2
-
-    passer = frame[frame["is_ball_carrier"] == True][["x", "y"]].values[0]
     team_A_id = frame[frame["is_ball_carrier"] == True]["team_id"].values[0]
     team_B_id = frame[frame["team_id"] != team_A_id]["team_id"].values[0]
-    receivers = frame[(frame["team_id"] == team_A_id) & (frame["is_ball_carrier"] == False)][["x", "y"]].values
-    defenders= frame[frame["team_id"] == team_B_id][["x", "y"]].values
-
+    
     offense_rating = OffenseRating(config.FIELD_LENGTH)
-    #offense_rating.plot_passing_probabilities(receivers, passer, defenders)
     pov_dict = offense_rating.calc_pov(frame) 
     offense_rating.plot_pov(home_team_id=team_A_id,
                             away_team_id=team_B_id,
                             frame=frame,
                             pov_dict=pov_dict)
-    
-    """offense_rating = OffenseRating(config.FIELD_LENGTH)
-    ocr_df = offense_rating.get_ocr(tracking_df)
-    print(ocr_df)"""
     

@@ -4,11 +4,13 @@ Defines all constants and parameters for the analysis
 """
 
 # Temporal parameters
-T = 2.0  # Duration of sequence in seconds for discretization
+OCR_FREQ = 2.0  # seconds
+SCR_FREQ = 1.0  # seconds
 
 # Spatial parameters
 R = 3.0  # Radius for danger zone in meters
 S = 1.0  # Threshold for pass line blocking in meters
+OD = 3.0 # for pass probability calc: defender obstruction distance threshold in meters
 
 # Field dimensions (standard, will be overridden by actual data)
 FIELD_LENGTH = 105.0  # meters

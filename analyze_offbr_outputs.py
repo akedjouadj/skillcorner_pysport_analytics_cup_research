@@ -14,24 +14,30 @@ plt.rcParams['figure.figsize'] = (12, 6)
 plt.rcParams['font.size'] = 10
 
 def add_metatdata_to_off_ball_rating(off_ball_rating_df, match_id):
+    """
+    Enrich OffBR output DataFrame with player names, positions, team names, and match outcomes
+    """
     
-    match_metadata = json.load(open(f"data/match_{match_id}/match.json"))
+    match_metadata = json.load(open(f"data/match_{match_id}/match.json", encoding='utf-8'))
 
     # add player name and position
     player_id_name_map = {}
     player_id_position_map = {}
     player_id_position_group_map = {}
+    player_id_playing_time_map = {}
     rated_player_ids = off_ball_rating_df['player_id'].unique().tolist()
     for player in match_metadata['players']:
         if player['id'] in rated_player_ids:
             player_id_name_map[player['id']] = f"{player['first_name']} {player['last_name']}"
             player_id_position_map[player['id']] = player['player_role']['name']
             player_id_position_group_map[player['id']] = player['player_role']['position_group']
+            player_id_playing_time_map[player['id']] = player['playing_time']['total']['minutes_played']
 
     off_ball_rating_df.insert(1, 'player_name', off_ball_rating_df['player_id'].map(player_id_name_map))
     off_ball_rating_df.insert(2, 'position', off_ball_rating_df['player_id'].map(player_id_position_map))
     off_ball_rating_df.insert(3, 'position_group', off_ball_rating_df['player_id'].map(player_id_position_group_map))
-
+    off_ball_rating_df.insert(4, 'playing_time', off_ball_rating_df['player_id'].map(player_id_playing_time_map))
+    
     # add team name
     home_team_id = match_metadata['home_team']['id']
     home_team_name = match_metadata['home_team']['name']
@@ -161,6 +167,7 @@ def analyze_temporal_evolution(combined_df: pd.DataFrame,
     Returns:
         Dictionary with statistics and insights
     """
+    
     print("\n" + "=" * 80)
     print("VALIDATION 2: TEMPORAL EVOLUTION (FATIGUE ANALYSIS)")
     print("=" * 80)

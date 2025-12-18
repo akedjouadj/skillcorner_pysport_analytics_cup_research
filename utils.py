@@ -122,7 +122,6 @@ def get_attacking_direction(team_id: int,
     else:
         return 'left'
 
-
 def point_to_line_distance(point: Tuple[float, float],
                             line_start: Tuple[float, float],
                             line_end: Tuple[float, float]) -> float:
@@ -158,6 +157,26 @@ def point_to_line_distance(point: Tuple[float, float],
     
     return distance(point, (closest_x, closest_y))
 
+def point_to_line_distance_vectorized(points, line_start, line_end):
+    """
+    Compute distances from multiple points to a line segment
+    """
+    p = points
+    a = np.array(line_start)
+    b = np.array(line_end)
+
+    ab = b - a
+    ap = p - a
+
+    t = np.clip(
+        np.sum(ap * ab, axis=1) / np.dot(ab, ab),
+        0.0,
+        1.0
+    )
+
+    closest = a + t[:, None] * ab
+    return np.linalg.norm(p - closest, axis=1)
+
 
 def midpoint(p1: Tuple[float, float], p2: Tuple[float, float]) -> Tuple[float, float]:
     """
@@ -173,6 +192,10 @@ def midpoint(p1: Tuple[float, float], p2: Tuple[float, float]) -> Tuple[float, f
     return ((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
 
 def draw_pitch(ax):
+    """
+    Draw a soccer pitch on given matplotlib axis
+    """
+    
     # Outer rectangle
     ax.add_patch(Rectangle((0,0), config.FIELD_LENGTH, config.FIELD_WIDTH, fill=False, lw=2))
 
@@ -196,6 +219,9 @@ def draw_pitch(ax):
     ax.add_patch(Arc((config.FIELD_LENGTH-11, config.FIELD_WIDTH/2), 18.3, 18.3, angle=0, theta1=130, theta2=230))
 
 def find_ball_carrier(frame, match, player_tracking_df_ids):
+    """ 
+    Identify the ball carrier in a given frame
+    """
     
     possession_team_id = frame["ball_owning_team_id"]
 

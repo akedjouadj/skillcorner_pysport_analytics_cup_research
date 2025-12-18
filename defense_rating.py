@@ -6,7 +6,7 @@ Measures defensive positioning, zone coverage, and pass line blocking
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from typing import Dict, List, Tuple, Set
+from typing import Dict, Tuple
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 import config
@@ -53,81 +53,83 @@ class DefenseRating:
     
     def identify_danger_zones(self, frame_data: pd.DataFrame):
         """
-        Identify danger zones centered on attackers
+        Optimized identification of danger zones (vectorized xT filtering)
         """
-        possession_team_id = frame_data['possession_team_id'].iloc[0]
+        possession_team_id = frame_data["possession_team_id"].iloc[0]
 
-        attackers = frame_data[frame_data['team_id'] == possession_team_id]
-        
-        # Ball carrier (for attacking direction)
-        ball_carrier = frame_data[frame_data['is_ball_carrier']].iloc[0]
-        attacking_direction = (
-            'right' if ball_carrier['x'] < self.field_length / 2 else 'left'
-        )
+        attackers = frame_data[frame_data["team_id"] == possession_team_id]
+
+        if attackers.empty:
+            return []
+
+        ball_carrier = frame_data[frame_data["is_ball_carrier"]].iloc[0]
+        attacking_direction = ball_carrier["attacking_direction"]
 
         xt_grid = XTGrid(
             self.field_length,
             self.field_width,
-            attacking_direction=attacking_direction
+            attacking_direction=attacking_direction,
         )
 
-        danger_zones = []
+        positions = attackers[["x", "y"]].values
+        player_ids = attackers["player_id"].values
 
-        for _, attacker in attackers.iterrows():
-            attacker_pos = (attacker['x'], attacker['y'])
+        xt_values = np.array([
+            xt_grid.get_xt_value(x, y) for x, y in positions
+        ])
 
-            xt_value = xt_grid.get_xt_value(*attacker_pos)
-            if xt_value < config.DANGER_ZONE_XT_THRESHOLD:
-                continue
+        mask = xt_values >= config.DANGER_ZONE_XT_THRESHOLD
 
-            danger_zones.append({
-                "attacker_id": attacker['player_id'],
-                "center": attacker_pos,
-                "xt_value": xt_value
-            })
+        danger_zones = [
+            {
+                "attacker_id": pid,
+                "center": (pos[0], pos[1]),
+                "xt_value": xt,
+            }
+            for pid, pos, xt in zip(player_ids[mask], positions[mask], xt_values[mask])
+        ]
 
         return danger_zones
-    
-    def assign_danger_zone_coverage(self, frame_data):
-        """
-        Assign defensive coverage to each danger zone
-        """
-        possession_team_id = frame_data['possession_team_id'].iloc[0]
-        defenders = frame_data[frame_data['team_id'] != possession_team_id]
 
-        covered_zones = []
-        
+    def assign_danger_zone_coverage(self, frame_data: pd.DataFrame):
+        """
+        Optimized assignment of defensive coverage to danger zones
+        (fully vectorized distance computation)
+        """
+        possession_team_id = frame_data["possession_team_id"].iloc[0]
+        defenders = frame_data[frame_data["team_id"] != possession_team_id]
+
+        if defenders.empty:
+            return []
+
+        defender_positions = defenders[["x", "y"]].values
+        defender_ids = defenders["player_id"].values
+
         danger_zones = self.identify_danger_zones(frame_data)
 
+        covered_zones = []
+
         for zone in danger_zones:
-            zone_center = zone["center"]
+            zone_center = np.array(zone["center"])
 
-            min_dist = float("inf")
-            closest_defender_id = None
-            closest_defender_pos = None
+            # Vectorized distance to all defenders
+            dists = np.linalg.norm(defender_positions - zone_center, axis=1)
 
-            for _, defender in defenders.iterrows():
-                d = utils.distance(
-                    zone_center,
-                    (defender['x'], defender['y'])
-                )
-                if d < min_dist:
-                    min_dist = d
-                    closest_defender_id = defender['player_id']
-                    closest_defender_pos = (defender['x'], defender['y'])
+            min_idx = np.argmin(dists)
+            min_dist = dists[min_idx]
 
             covered = min_dist < self.grid_step
 
             covered_zones.append({
                 **zone,
                 "covered": covered,
-                "defender_id": closest_defender_id if covered else None,
-                "defender_pos": closest_defender_pos if covered else None,
-                "defender_distance": min_dist
+                "defender_id": defender_ids[min_idx] if covered else None,
+                "defender_pos": tuple(defender_positions[min_idx]) if covered else None,
+                "defender_distance": float(min_dist),
             })
 
         return covered_zones
-    
+
     def calc_zone_coverage(self, frame_data):
         """
         Aggregate zone coverage per defender
@@ -282,65 +284,80 @@ class DefenseRating:
     
     def identify_pass_lines(self, frame_data: pd.DataFrame):
         """
-        Identify potential pass lines from the ball carrier to teammates
+        Optimized identification of potential pass lines
         """
-        possession_team_id = frame_data['possession_team_id'].iloc[0]
+        possession_team_id = frame_data["possession_team_id"].iloc[0]
 
         attackers = frame_data[
-            (frame_data['team_id'] == possession_team_id) &
-            (frame_data['is_ball_carrier'] == False)
+            (frame_data["team_id"] == possession_team_id) &
+            (~frame_data["is_ball_carrier"])
         ]
 
-        ball_carrier = frame_data[frame_data['is_ball_carrier']].iloc[0]
-        ball_pos = (ball_carrier['x'], ball_carrier['y'])
+        if attackers.empty:
+            return []
 
-        pass_lines = []
+        ball_carrier = frame_data[frame_data["is_ball_carrier"]].iloc[0]
+        ball_pos = np.array([ball_carrier["x"], ball_carrier["y"]])
 
-        for _, att in attackers.iterrows():
-            receiver_pos = (att['x'], att['y'])
+        attacker_pos = attackers[["x", "y"]].values
+        attacker_ids = attackers["player_id"].values
 
-            if utils.distance(ball_pos, receiver_pos) < config.D_MAX:
-                pass_lines.append({
-                    "start": ball_pos,
-                    "end": receiver_pos,
-                    "receiver_id": att['player_id']
-                })
+        dists = np.linalg.norm(attacker_pos - ball_pos, axis=1)
+        mask = dists < config.D_MAX
+
+        pass_lines = [
+            {
+                "start": tuple(ball_pos),
+                "end": tuple(pos),
+                "receiver_id": pid,
+            }
+            for pid, pos in zip(attacker_ids[mask], attacker_pos[mask])
+        ]
 
         return pass_lines
     
-    def assign_pass_line_blocking(self, frame_data):
+    def assign_pass_line_blocking(self, frame_data: pd.DataFrame):
         """
-        Assign defenders blocking each pass line
+        Optimized assignment of defenders blocking pass lines
         """
-        possession_team_id = frame_data['possession_team_id'].iloc[0]
-        defenders = frame_data[frame_data['team_id'] != possession_team_id]
+        possession_team_id = frame_data["possession_team_id"].iloc[0]
+        defenders = frame_data[frame_data["team_id"] != possession_team_id]
+
+        if defenders.empty:
+            return []
+
+        defender_pos = defenders[["x", "y"]].values
+        defender_ids = defenders["player_id"].values
+
+        pass_lines = self.identify_pass_lines(frame_data)
 
         blocked_lines = []
 
-        pass_lines = self.identify_pass_lines(frame_data)
-        
         for line in pass_lines:
-            blockers = []
+            dists = utils.point_to_line_distance_vectorized(
+                defender_pos,
+                line["start"],
+                line["end"],
+            )
 
-            for _, defender in defenders.iterrows():
-                d_pos = (defender['x'], defender['y'])
+            mask = dists < config.S
 
-                dist = utils.point_to_line_distance(
-                    d_pos,
-                    line["start"],
-                    line["end"]
+            blockers = [
+                {
+                    "defender_id": pid,
+                    "defender_pos": tuple(pos),
+                    "distance": float(dist),
+                }
+                for pid, pos, dist in zip(
+                    defender_ids[mask],
+                    defender_pos[mask],
+                    dists[mask],
                 )
-
-                if dist < config.S:
-                    blockers.append({
-                        "defender_id": defender['player_id'],
-                        "defender_pos": d_pos,
-                        "distance": dist
-                    })
+            ]
 
             blocked_lines.append({
                 **line,
-                "blocked_by": blockers
+                "blocked_by": blockers,
             })
 
         return blocked_lines
@@ -459,7 +476,7 @@ class DefenseRating:
 
         plt.tight_layout()
         plt.show()
-
+    
     def get_scr(self, tracking_df: pd.DataFrame) -> pd.DataFrame:
         """
         Calculate Space Control Rating (SCR) for all players across entire match
@@ -468,115 +485,80 @@ class DefenseRating:
             tracking_df: Full tracking DataFrame for the match
             
         Returns:
-            DataFrame with columns: player_id, team_id, scr, playing_time
+            DataFrame with columns: player_id, team_id, scr
         """
-        frames = sorted(tracking_df['frame_id'].unique())
         
-        # Initialize accumulators
         coverage_accumulator = {}
         blocking_accumulator = {}
-        playing_time = {}
         team_mapping = {}
 
-        # downsample to T-second intervals if needed
-        period = 1 # 1 second intervals
+        period = config.SCR_FREQ
         fps = config.FPS
         frame_interval = int(period * fps)
+
+        frames = sorted(tracking_df["frame_id"].unique())
         frames = frames[::frame_interval]
-        
-        # Process each frame
+
+        # 🔥 Key optimization: group once
+        grouped = tracking_df.groupby("frame_id")
+
         print("Calculating Space Control Rating (SCR) for all players at a 1-second interval...")
+
         for frame_id in tqdm(frames):
-            frame_data = tracking_df[tracking_df['frame_id'] == frame_id]
-            ball_carrier = frame_data[frame_data['is_ball_carrier']]
-            if len(ball_carrier) == 0:
+            if frame_id not in grouped.groups:
                 continue
-            
-            # Calculate zone coverage
+
+            frame_data = grouped.get_group(frame_id)
+
+            if not frame_data["is_ball_carrier"].any():
+                continue
+
             coverage = self.calc_zone_coverage(frame_data)
-            
-            # Calculate pass line blocking
             blocking = self.calc_pass_line_blocking(frame_data)
-            
-            # Accumulate for each player
+
             for player_id in coverage.keys():
                 if player_id not in coverage_accumulator:
                     coverage_accumulator[player_id] = []
                     blocking_accumulator[player_id] = []
-                    playing_time[player_id] = 0.0
-                    
-                    # Store team mapping
-                    player_team = frame_data[frame_data['player_id'] == player_id]['team_id'].iloc[0]
-                    team_mapping[player_id] = player_team
-                
+
+                    team_mapping[player_id] = frame_data.loc[frame_data["player_id"] == player_id, "team_id"].iloc[0]
+
                 coverage_accumulator[player_id].append(coverage[player_id])
                 blocking_accumulator[player_id].append(blocking[player_id])
-                playing_time[player_id] = frame_id/10/60 # minutes played
-        
-        # Create result DataFrame
+
         results_df = []
         results_seq = {}
+
         for player_id in coverage_accumulator.keys():
-            time_played = playing_time[player_id]
             
-            if time_played > 0:
-                # Average coverage and blocking ratios
-                avg_coverage = np.mean(coverage_accumulator[player_id]) # avg coverage zones ratio per second
-                avg_blocking = np.mean(blocking_accumulator[player_id]) # avg blocking lines ratio per second
-                
-                # SCR combines both metrics
-                scr = (avg_coverage + avg_blocking) / 2.0
-                
-            else:
-                scr = 0.0
+            avg_cov = np.mean(coverage_accumulator[player_id]) if len(coverage_accumulator[player_id]) > 0 else 0.0
+            avg_blk = np.mean(blocking_accumulator[player_id]) if len(blocking_accumulator[player_id]) > 0 else 0.0
+            scr = (avg_cov + avg_blk) / 2.0
             
             results_df.append({
-                'player_id': player_id,
-                'team_id': team_mapping[player_id],
-                'avg_zone_coverage': avg_coverage if time_played > 0 else 0.0,
-                'avg_pass_line_blocking': avg_blocking if time_played > 0 else 0.0,
-                'avg_space_control_rating': scr,
-                'playing_time': time_played
+                "player_id": player_id,
+                "team_id": team_mapping[player_id],
+                "avg_zone_coverage": avg_cov,
+                "avg_pass_line_blocking": avg_blk,
+                "avg_space_control_rating": scr
             })
 
             results_seq[player_id] = {
-                'seq_zone_coverage': coverage_accumulator[player_id],
-                'seq_pass_line_blocking': blocking_accumulator[player_id],
-                'seq_space_control_rating': (np.array(coverage_accumulator[player_id]) + np.array(blocking_accumulator[player_id])) / 2.0,
+                "seq_zone_coverage": coverage_accumulator[player_id],
+                "seq_pass_line_blocking": blocking_accumulator[player_id],
+                "seq_space_control_rating": (
+                    (np.array(coverage_accumulator[player_id]) +
+                    np.array(blocking_accumulator[player_id])) / 2.0
+                ),
             }
-        
+
         return pd.DataFrame(results_df), results_seq
 
 if __name__ == "__main__":
     
+    # Example usage: plot danger zone coverage for a single frame
     
-    """frame = pd.read_csv("data/match_1886347/frame.csv")
-
-    # check if a player is in possession of the ball
-    if frame["is_ball_carrier"].sum() == 0:
-        raise ValueError("No player in possession of the ball in this frame.")
-
-    # translater les coordonnées pour que l'origine soit au coin bas gauche et non au centre
-    frame["x"] = frame["x"] + config.FIELD_LENGTH / 2
-    frame["y"] = frame["y"] + config.FIELD_WIDTH / 2
+    frame = pd.read_csv("data/match_1886347/frame.csv")
 
     defense_rating = DefenseRating(config.FIELD_LENGTH, config.FIELD_WIDTH)
-    #coverage_dict = defense_rating.calc_zone_coverage(frame)
-    #print("Zone coverage per defender:\n", coverage_dict)
     defense_rating.plot_danger_zone_coverage(frame)
-
-    #blocking_dict = defense_rating.calc_pass_line_blocking(frame)
-    #print("Pass line blocking per defender:\n", blocking_dict)
-    #
-    #defense_rating.plot_pass_line_blocking(frame)
-    """
-
-    tracking_df = pd.read_csv("data/match_1886347/tracking_df.csv")
-    
-    # translater les coordonnées pour que l'origine soit au coin bas gauche et non au centre
-    tracking_df["x"] = tracking_df["x"] + config.FIELD_LENGTH / 2
-    tracking_df["y"] = tracking_df["y"] + config.FIELD_WIDTH / 2
-
-    defense_rating = DefenseRating(config.FIELD_LENGTH, config.FIELD_WIDTH)
-    scr_df = defense_rating.get_scr(tracking_df)
-    print(scr_df)
