@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
 from typing import Tuple
-import config
+import src.config as config
 
 
 class XTGrid:

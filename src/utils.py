@@ -5,7 +5,7 @@ Utility functions for geometric calculations and offside detection
 import numpy as np
 from typing import Tuple, List
 import pandas as pd
-import config
+import src.config as config
 
 from matplotlib.patches import Circle, Rectangle, Arc
 

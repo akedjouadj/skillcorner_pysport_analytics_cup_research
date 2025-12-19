@@ -4,8 +4,8 @@ from kloppy import skillcorner
 from tqdm import tqdm
 from typing import Dict
 
-import config
-import utils
+import src.config as config
+import src.utils as utils
 
 def load_and_process_tracking_df(match_id: int) -> pd.DataFrame:
     """

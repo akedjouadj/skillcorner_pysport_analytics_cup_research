@@ -9,9 +9,9 @@ from tqdm import tqdm
 from typing import Dict, Tuple
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
-import config
-import utils
-from xt_grid import XTGrid
+import src.config as config
+import src.utils as utils
+from src.xt_grid import XTGrid
 
 
 class DefenseRating:

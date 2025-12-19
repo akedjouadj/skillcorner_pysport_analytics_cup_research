@@ -11,9 +11,9 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from typing import Dict, Tuple, List
 
-import config
-import utils
-from xt_grid import XTGrid
+import src.config as config
+import src.utils as utils
+from src.xt_grid import XTGrid
 
 
 class OffenseRating:
